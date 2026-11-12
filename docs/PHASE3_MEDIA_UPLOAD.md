@@ -15,7 +15,7 @@ Content-Type: multipart/form-data
 
 The request must contain exactly one file in the multipart field named `file`. Each request uploads one image. A request containing no file or an invalid upload request returns `400 INVALID_UPLOAD_REQUEST`.
 
-The path identifier is the public investigation UUID. An identifier that does not match an existing investigation returns `404 INVESTIGATION_NOT_FOUND`. Handling of malformed UUID syntax is unresolved; see [Open question](#open-question).
+The path identifier is the public investigation UUID. Malformed UUID syntax returns `400 INVALID_UPLOAD_REQUEST`. A valid UUID that does not identify an existing investigation returns `404 INVESTIGATION_NOT_FOUND`.
 
 ## 2. Successful response
 
@@ -39,7 +39,7 @@ An accepted upload returns `201 Created` and exactly the following nine top-leve
 |---|---|
 | `investigation_id` | Public UUID of the investigation. |
 | `media_id` | Server-generated public UUID of the media asset. |
-| `filename` | Sanitized original client filename for display. It is not used to construct a filesystem path. |
+| `filename` | Sanitized original uploaded filename for display. It is not used to construct a physical storage path. |
 | `mime_type` | MIME type determined from validated image content. |
 | `size_bytes` | Actual number of uploaded file bytes. |
 | `checksum` | Hexadecimal SHA-256 digest of the original uploaded file bytes. |
@@ -47,7 +47,7 @@ An accepted upload returns `201 Created` and exactly the following nine top-leve
 | `height` | Validated image height in pixels. |
 | `uploaded_at` | UTC ISO 8601 timestamp for the accepted upload. |
 
-The response must not contain internal storage paths or additional undocumented fields. `media_id` is public. `filename` is the sanitized original client filename for display; the physical storage filename is separate, server-generated from a UUID, and is never exposed as a path.
+The response must not contain internal storage paths or additional undocumented fields. `media_id` is public. `filename` is the sanitized original uploaded filename for display. The physical storage filename is separate and server-generated from a UUID; the original filename is never used to construct the physical storage path, and no internal path is exposed.
 
 ## 3. Accepted image content and limits
 
@@ -77,11 +77,11 @@ Uploads are locked when the investigation is in any of these states:
 - `partial`
 - `failed`
 
-A locked upload returns `409 MEDIA_UPLOAD_LOCKED`. Upload requests do not create or queue analysis jobs and do not perform analysis.
+A locked upload returns `409 MEDIA_UPLOAD_LOCKED`. The upload service must allow uploads only when the investigation status is `awaiting_media` or `received`; all other statuses are rejected by the service-layer eligibility check. Upload requests do not create or queue analysis jobs and do not perform analysis.
 
 ### Existing-schema compatibility note
 
-The current `investigations.status` SQLite constraint allows `awaiting_media`, `received`, `processing`, `completed`, and `failed`; it does not allow `queued` or `partial`. This specification defines those two states as upload-lock conditions, but does not decide where those states will be represented or authorize changing the frozen Phase 2 schema. That representation must be resolved before implementation.
+Retain the existing Phase 2 `investigations.status` SQLite constraint unchanged. Phase 3 must not add `queued` or `partial` to the database constraint, and no Phase 3 database migration is required for these states. Future locked states, including `queued` and `partial`, must be rejected by the service-layer upload eligibility check when introduced.
 
 ## 5. Duplicate uploads and image count
 
@@ -124,8 +124,8 @@ These are the complete set of 13 agreed upload error codes. Do not add other upl
 
 | HTTP status | Error code | Meaning |
 |---:|---|---|
-| 400 | `INVALID_UPLOAD_REQUEST` | The multipart upload request is missing the required file or is otherwise invalid. |
-| 404 | `INVESTIGATION_NOT_FOUND` | No investigation exists with the supplied identifier. |
+| 400 | `INVALID_UPLOAD_REQUEST` | The investigation UUID syntax is malformed, the required file is missing, or the multipart upload request is otherwise invalid. |
+| 404 | `INVESTIGATION_NOT_FOUND` | The supplied UUID is valid but no investigation exists with that identifier. |
 | 409 | `MEDIA_UPLOAD_NOT_ALLOWED` | The investigation input type is not `image` or `text_image`. |
 | 409 | `MEDIA_UPLOAD_LOCKED` | The investigation is in a locked lifecycle state. |
 | 409 | `DUPLICATE_MEDIA` | The investigation already contains media with the same SHA-256 checksum. |
@@ -140,7 +140,7 @@ These are the complete set of 13 agreed upload error codes. Do not add other upl
 
 ## 10. Security and validation requirements
 
-- Validate the investigation UUID and existence before accepting the upload.
+- Validate investigation UUID syntax and existence before accepting the upload; malformed syntax uses `400 INVALID_UPLOAD_REQUEST`, while a valid UUID with no matching investigation uses `404 INVESTIGATION_NOT_FOUND`.
 - Enforce investigation type, lifecycle lock, duplicate, and image-count rules.
 - Enforce the byte limit while receiving the file; do not rely only on the declared content length.
 - Decode and validate actual image content and derive the returned MIME type from that validated content.
@@ -149,7 +149,3 @@ These are the complete set of 13 agreed upload error codes. Do not add other upl
 - Calculate the checksum from the exact original uploaded bytes used for duplicate detection.
 - Keep internal paths, stack traces, and database details out of API responses.
 - Clean up temporary and moved files after observed upload failures.
-
-## Open question
-
-The agreed error list does not specify how to handle malformed `investigation_id` UUID syntax. It includes `INVESTIGATION_NOT_FOUND` for an unknown investigation but does not include an invalid-UUID code. Resolve this mapping before implementation without adding an unapproved error code.
