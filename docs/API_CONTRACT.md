@@ -70,7 +70,11 @@ Initial status is `received` for `text` and `awaiting_media` for `image` and `te
   "investigation_id": "255424f1-2e46-48b0-a457-53a5f0b26e60",
   "input_type": "text",
   "status": "received",
-  "claim": "A fictional claim submitted for investigation.",
+  "claim": {
+    "text": "A fictional claim submitted for investigation.",
+    "language": "en",
+    "normalized_text": "A fictional claim submitted for investigation."
+  },
   "source_reference": "https://example.org/report",
   "created_at": "2026-11-13T08:15:30.123456Z",
   "updated_at": "2026-11-13T08:15:30.123456Z",
@@ -81,7 +85,7 @@ Initial status is `received` for `text` and `awaiting_media` for `image` and `te
 }
 ```
 
-The response contains exactly these 11 fields. `media` is an empty list, and `latest_job`, `latest_result`, and `failure` are `null` until their respective future phases are implemented. This phase does not create job, result, or failure objects. An unknown UUID returns `404 Not Found`; invalid UUID syntax returns `422 Unprocessable Entity`.
+The response contains exactly these 11 fields. `claim` is `null` for image-only investigations. `media` is an empty list, and `latest_job`, `latest_result`, and `failure` are `null` until their respective future phases are implemented. This phase does not create job, result, or failure objects. An unknown UUID returns `404 Not Found`; invalid UUID syntax returns `422 Unprocessable Entity`.
 
 ## Retrieve investigation history
 
@@ -104,7 +108,11 @@ The response contains exactly these 11 fields. `media` is an empty list, and `la
       "investigation_id": "255424f1-2e46-48b0-a457-53a5f0b26e60",
       "input_type": "text",
       "status": "received",
-      "claim": "A fictional claim submitted for investigation.",
+      "claim": {
+        "text": "A fictional claim submitted for investigation.",
+        "language": "en",
+        "normalized_text": "A fictional claim submitted for investigation."
+      },
       "source_reference": "https://example.org/report",
       "created_at": "2026-11-13T08:15:30.123456Z",
       "updated_at": "2026-11-13T08:15:30.123456Z"
