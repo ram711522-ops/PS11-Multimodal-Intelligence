@@ -67,6 +67,11 @@ class Settings:
     database_path: Path = DEFAULT_DATABASE_PATH
     media_storage_path: Path = DEFAULT_MEDIA_STORAGE_PATH
     video_processing: VideoProcessingSettings = VideoProcessingSettings()
+    image_detector_model_path: Path | None = None
+    video_detector_model_path: Path | None = None
+    audio_detector_model_path: Path | None = None
+    max_audio_size_bytes: int = 100 * 1024 * 1024
+    max_audio_duration_seconds: int = 120
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -74,6 +79,13 @@ class Settings:
 
         configured_path = os.getenv("PS11_DATABASE_PATH")
         configured_media_path = os.getenv("PS11_MEDIA_STORAGE_PATH")
+        image_model_path = os.getenv("PS11_IMAGE_DETECTOR_MODEL_PATH")
+        video_model_path = os.getenv("PS11_VIDEO_DETECTOR_MODEL_PATH")
+        audio_model_path = os.getenv("PS11_AUDIO_DETECTOR_MODEL_PATH")
+        max_audio_size = _read_int("PS11_AUDIO_MAX_SIZE_BYTES", 100 * 1024 * 1024)
+        max_audio_duration = _read_int("PS11_AUDIO_MAX_DURATION_SECONDS", 120)
+        if max_audio_size <= 0 or max_audio_duration <= 0:
+            raise ValueError("Audio detection limits must be positive values.")
         return cls(
             database_path=Path(configured_path) if configured_path else DEFAULT_DATABASE_PATH,
             media_storage_path=(
@@ -82,6 +94,11 @@ class Settings:
                 else DEFAULT_MEDIA_STORAGE_PATH
             ),
             video_processing=VideoProcessingSettings.from_environment(),
+            image_detector_model_path=Path(image_model_path) if image_model_path else None,
+            video_detector_model_path=Path(video_model_path) if video_model_path else None,
+            audio_detector_model_path=Path(audio_model_path) if audio_model_path else None,
+            max_audio_size_bytes=max_audio_size,
+            max_audio_duration_seconds=max_audio_duration,
         )
 
 

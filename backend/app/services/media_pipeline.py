@@ -93,6 +93,7 @@ class ProcessingOutcome:
     started_at: str | None = None
     completed_at: str | None = None
     reference_comparison: dict | None = None
+    deepfake_detections: tuple[dict[str, Any], ...] = ()
 
 
 class MediaProcessingException(Exception):
@@ -404,6 +405,9 @@ def _process_media(
         result = processor.process(request)
         completed_at = utc_now_iso8601()
         reference_comparison = None
+        deepfake_detections = _run_deepfake_detectors(
+            media_type, source_path, result, Path(media_storage_path)
+        )
         if media_type == "image":
             with database_connection(database_path) as connection:
                 reference_comparison = compare_local_references(
@@ -421,6 +425,7 @@ def _process_media(
             started_at=started_at,
             completed_at=completed_at,
             reference_comparison=reference_comparison,
+            deepfake_detections=deepfake_detections,
         )
         with database_connection(database_path) as connection:
             complete_processing_run(
@@ -449,6 +454,7 @@ def _process_media(
             started_at=started_at,
             completed_at=completed_at,
             reference_comparison=reference_comparison,
+            deepfake_detections=tuple(item.to_dict() for item in deepfake_detections),
         )
     except MediaProcessingException as exc:
         _record_failure(database_path, run_id, exc.failure)
@@ -505,6 +511,8 @@ def _validated_media_type(asset: dict[str, Any]) -> str | None:
         return "image"
     if media_type == "video" and mime_type.startswith("video/") and len(mime_type) > 6:
         return "video"
+    if media_type == "audio" and mime_type.startswith("audio/") and len(mime_type) > 6:
+        return "audio"
     return None
 
 
@@ -513,6 +521,10 @@ def _create_processor(media_type: str) -> MediaProcessor:
         from backend.app.services.image_processor import ImageProcessor
 
         return ImageProcessor()
+    if media_type == "audio":
+        from backend.app.services.audio_processor import AudioProcessor
+
+        return AudioProcessor()
     from backend.app.services.video_processor import VideoProcessor
 
     return VideoProcessor()
@@ -537,7 +549,7 @@ def _create_skipped_run(
                 processing_run_id=run_id,
                 media_id=media_id,
                 investigation_id=investigation_id,
-                media_type=media_type if media_type in {"image", "video"} else None,
+                media_type=media_type if media_type in {"image", "video", "audio"} else None,
                 processor_name=processor_name,
                 processor_version=processor_version,
                 status="received",
@@ -604,6 +616,65 @@ def _artifact_directory(storage_root: Path, media_type: str) -> Path:
     return storage_root / "processed"
 
 
+def _run_deepfake_detectors(
+    media_type: str,
+    source_path: Path,
+    processing_result: Any,
+    storage_root: Path,
+) -> tuple[Any, ...]:
+    """Run optional detectors independently of preprocessing and pHash results."""
+
+    from backend.app.services.deepfake_detection import failed_result
+
+    if media_type == "audio":
+        detection = getattr(processing_result, "detector_result", None)
+        return (detection,) if detection is not None else ()
+
+    detections = []
+    if media_type == "image":
+        from backend.app.services.image_deepfake_detector import detect_image
+
+        try:
+            detections.append(detect_image(source_path))
+        except Exception:
+            logger.exception("Image deepfake detector failed outside its error boundary")
+            detections.append(failed_result(
+                modality="image", detector_name="ps11.image.ai-generated-classifier",
+                detector_version="1.0.0", model_name="Imager-1-Pro",
+                model_version="unknown", model_source_url="https://huggingface.co/Imagers/imager-1-pro",
+                model_license="Apache-2.0", code="DETECTOR_FAILED",
+                message="The image detector failed safely.",
+            ))
+    elif media_type == "video":
+        from backend.app.services.video_deepfake_detector import detect_video_frames
+        from backend.app.services.audio_deepfake_detector import detect_video_audio
+
+        try:
+            detections.append(detect_video_frames(processing_result.frames, storage_root))
+        except Exception:
+            logger.exception("Video deepfake detector failed outside its error boundary")
+            detections.append(failed_result(
+                modality="video", detector_name="ps11.video.mtl-face-auth",
+                detector_version="1.0.0", model_name="MTL Face Anti-Spoofing and Deepfake Detection",
+                model_version="unknown", model_source_url="https://huggingface.co/shahriarhd/mtl-face-auth",
+                model_license="MIT", code="DETECTOR_FAILED",
+                message="The video detector failed safely.",
+            ))
+        try:
+            detections.append(detect_video_audio(source_path))
+        except Exception:
+            logger.exception("Video audio analysis failed outside its error boundary")
+            detections.append(failed_result(
+                modality="audio", detector_name="ps11.audio.wav2vec2-synthetic-speech",
+                detector_version="1.0.0", model_name="wav2vec2-deepfake-voice-detector",
+                model_version="unknown",
+                model_source_url="https://huggingface.co/garystafford/wav2vec2-deepfake-voice-detector",
+                model_license="Apache-2.0", code="AUDIO_DETECTION_FAILED",
+                message="The video audio detector failed safely.",
+            ))
+    return tuple(detections)
+
+
 def _result_payload(
     result: Any,
     *,
@@ -616,8 +687,10 @@ def _result_payload(
     started_at: str,
     completed_at: str,
     reference_comparison: dict | None = None,
+    deepfake_detections: tuple[Any, ...] = (),
 ) -> dict[str, Any]:
     result_fields = asdict(result)
+    result_fields.pop("detector_result", None)
     payload = {
         "investigation_id": investigation_id,
         "media_id": media_id,
@@ -632,6 +705,7 @@ def _result_payload(
     }
     if reference_comparison is not None:
         payload["reference_comparison"] = reference_comparison
+    payload["deepfake_detections"] = [item.to_dict() for item in deepfake_detections]
     return payload
 
 
