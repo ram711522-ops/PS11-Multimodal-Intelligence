@@ -61,6 +61,27 @@ class InvestigationApiTests(unittest.TestCase):
                 self.assertEqual(response.json()["input_type"], payload["input_type"])
                 self.assertEqual(response.json()["status"], expected_status)
 
+    def test_creation_keeps_claim_text_string_or_null(self) -> None:
+        text_claim = "Submitted claim stays a string in the request and database."
+        text_creation = self.create(
+            {"input_type": "text", "claim_text": text_claim}
+        )
+        image_creation = self.create({"input_type": "image", "claim_text": None})
+
+        self.assertEqual(text_creation.status_code, 201)
+        self.assertEqual(image_creation.status_code, 201)
+        with database_connection(self.database_path) as connection:
+            stored_text = connection.execute(
+                "SELECT claim_text FROM investigations WHERE id = ?",
+                (text_creation.json()["investigation_id"],),
+            ).fetchone()["claim_text"]
+            stored_image_claim = connection.execute(
+                "SELECT claim_text FROM investigations WHERE id = ?",
+                (image_creation.json()["investigation_id"],),
+            ).fetchone()["claim_text"]
+        self.assertEqual(stored_text, text_claim)
+        self.assertIsNone(stored_image_claim)
+
     def test_creation_response_has_exact_contract_fields(self) -> None:
         response = self.create({"input_type": "text", "claim_text": "Example claim"})
 
@@ -79,6 +100,7 @@ class InvestigationApiTests(unittest.TestCase):
             {
                 "input_type": "text_image",
                 "claim_text": "Claim with future media",
+                "language": "hi-IN",
                 "source_reference": "https://example.org/source",
             }
         ).json()
@@ -108,11 +130,66 @@ class InvestigationApiTests(unittest.TestCase):
             },
         )
         self.assertEqual(body["investigation_id"], created["investigation_id"])
-        self.assertEqual(body["claim"], "Claim with future media")
+        self.assertEqual(
+            body["claim"],
+            {
+                "text": "Claim with future media",
+                "language": "hi-IN",
+                "normalized_text": None,
+            },
+        )
         self.assertEqual(body["media"], [])
         self.assertIsNone(body["latest_job"])
         self.assertIsNone(body["latest_result"])
         self.assertIsNone(body["failure"])
+
+    def test_image_only_retrieval_uses_null_claim_in_single_and_history(self) -> None:
+        created = self.create({"input_type": "image", "claim_text": None}).json()
+        app = create_app(self.settings)
+        single = self.request(
+            app,
+            "GET",
+            f"/api/investigations/{created['investigation_id']}",
+        )
+        history = self.request(app, "GET", "/api/investigations")
+        history_item = next(
+            item
+            for item in history.json()["items"]
+            if item["investigation_id"] == created["investigation_id"]
+        )
+
+        self.assertEqual(single.status_code, 200)
+        self.assertIsNone(single.json()["claim"])
+        self.assertIsNone(history_item["claim"])
+        self.assertEqual(single.json()["claim"], history_item["claim"])
+
+    def test_single_and_history_text_claims_have_identical_representation(self) -> None:
+        submitted = "Claim appears as text without normalization."
+        created = self.create(
+            {"input_type": "text", "claim_text": submitted, "language": "en-GB"}
+        ).json()
+        app = create_app(self.settings)
+        single = self.request(
+            app,
+            "GET",
+            f"/api/investigations/{created['investigation_id']}",
+        )
+        history = self.request(app, "GET", "/api/investigations")
+        history_item = next(
+            item
+            for item in history.json()["items"]
+            if item["investigation_id"] == created["investigation_id"]
+        )
+        expected_claim = {
+            "text": submitted,
+            "language": "en-GB",
+            "normalized_text": None,
+        }
+
+        self.assertEqual(single.status_code, 200)
+        self.assertEqual(single.json()["claim"], expected_claim)
+        self.assertEqual(history_item["claim"], expected_claim)
+        self.assertEqual(single.json()["claim"], history_item["claim"])
 
     def test_image_rejects_non_null_claim(self) -> None:
         response = self.create({"input_type": "image", "claim_text": "Not allowed"})
@@ -184,10 +261,11 @@ class InvestigationApiTests(unittest.TestCase):
     def test_language_bcp47_validation_and_automatic_mode(self) -> None:
         for language in (
             "en",
-            "hi",
-            "te",
             "en-US",
+            "en-GB",
+            "hi",
             "hi-IN",
+            "te",
             "te-IN",
         ):
             with self.subTest(language=language):
@@ -220,7 +298,7 @@ class InvestigationApiTests(unittest.TestCase):
 
     def test_valid_unsupported_language_returns_contract_error(self) -> None:
         response = self.create(
-            {"input_type": "text", "claim_text": "Claim", "language": "fr"}
+            {"input_type": "text", "claim_text": "Claim", "language": "fr-FR"}
         )
         self.assert_standard_error(response, 422, "LANGUAGE_NOT_SUPPORTED")
 
@@ -328,7 +406,10 @@ class InvestigationApiTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["claim"], "Persistent claim")
+        self.assertEqual(
+            response.json()["claim"],
+            {"text": "Persistent claim", "language": None, "normalized_text": None},
+        )
 
     def test_unexpected_database_error_is_sanitized(self) -> None:
         app = create_app(self.settings)

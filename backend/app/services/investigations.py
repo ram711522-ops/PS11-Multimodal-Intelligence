@@ -14,6 +14,7 @@ from backend.app.repositories.investigations import (
     insert_investigation,
     list_investigations,
 )
+from backend.app.repositories.media_assets import list_media_assets_for_investigation
 from backend.app.schemas.investigations import InvestigationCreateRequest
 
 
@@ -73,6 +74,7 @@ def retrieve_investigation(database_path: Path | str, investigation_id: str) -> 
     canonical_id = parse_investigation_uuid(investigation_id)
     with database_connection(database_path) as connection:
         investigation = get_investigation(connection, canonical_id)
+        media = list_media_assets_for_investigation(connection, canonical_id)
 
     if investigation is None:
         raise ApiError(404, "not_found", "Investigation not found.")
@@ -80,11 +82,11 @@ def retrieve_investigation(database_path: Path | str, investigation_id: str) -> 
         "investigation_id": investigation["id"],
         "input_type": investigation["input_type"],
         "status": investigation["status"],
-        "claim": investigation["claim_text"],
+        "claim": _claim_representation(investigation),
         "source_reference": investigation["source_reference"],
         "created_at": investigation["created_at"],
         "updated_at": investigation["updated_at"],
-        "media": [],
+        "media": media,
         "latest_job": None,
         "latest_result": None,
         "failure": None,
@@ -115,7 +117,7 @@ def retrieve_history(
             "investigation_id": row["id"],
             "input_type": row["input_type"],
             "status": row["status"],
-            "claim": row["claim_text"],
+            "claim": _claim_representation(row),
             "source_reference": row["source_reference"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
@@ -123,3 +125,14 @@ def retrieve_history(
         for row in rows
     ]
     return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+def _claim_representation(investigation: dict) -> dict | None:
+    claim_text = investigation["claim_text"]
+    if claim_text is None:
+        return None
+    return {
+        "text": claim_text,
+        "language": investigation["language"],
+        "normalized_text": None,
+    }

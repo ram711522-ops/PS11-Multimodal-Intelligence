@@ -13,7 +13,7 @@ This contract defines investigation creation and retrieval. Investigation and me
 - Timestamps are UTC ISO 8601 strings ending in `Z`.
 - Request and response bodies use JSON (`application/json`).
 - Errors use `{ "error": { "code": "...", "message": "...", "details": {} } }`.
-- `language` accepts a well-formed BCP-47 language tag with primary language `en`, `hi`, or `te`; valid regional variants such as `en-US`, `hi-IN`, and `te-IN` are accepted. Missing or `null` means automatic-detection mode and is stored as `null`. This metadata contract does not mean language detection, translation, or language processing is implemented.
+- `language` accepts exactly `en`, `en-US`, `en-GB`, `hi`, `hi-IN`, `te`, and `te-IN` after BCP-47 syntax and casing normalization. A well-formed but unsupported tag returns HTTP 422 with `LANGUAGE_NOT_SUPPORTED`; a malformed tag returns HTTP 422 with `INVALID_LANGUAGE_TAG`. Missing or `null` means automatic-detection mode and is stored as `null`. This metadata contract does not mean language detection, translation, or language processing is implemented.
 
 ## Create an investigation
 
@@ -35,7 +35,7 @@ This contract defines investigation creation and retrieval. Investigation and me
 | `input_type` | string | Required; one of `text`, `image`, or `text_image`. |
 | `claim_text` | string or null | `text` and `text_image` require non-empty text. `image` requires `null` (omitting the field is treated as null). Maximum 10,000 characters. |
 | `source_reference` | string or null | Optional valid HTTP or HTTPS URL; maximum 2,048 characters. |
-| `language` | string or null | Optional well-formed BCP-47 tag whose primary language is `en`, `hi`, or `te`. Regional variants are allowed. Missing/null is stored as null; no language detector runs in this phase. |
+| `language` | string or null | Optional BCP-47 tag from the exact allowlist: `en`, `en-US`, `en-GB`, `hi`, `hi-IN`, `te`, or `te-IN`. Missing/null is stored as null; no language detector runs in this phase. |
 
 ### Success response
 
@@ -73,7 +73,7 @@ Initial status is `received` for `text` and `awaiting_media` for `image` and `te
   "claim": {
     "text": "A fictional claim submitted for investigation.",
     "language": "en",
-    "normalized_text": "A fictional claim submitted for investigation."
+    "normalized_text": null
   },
   "source_reference": "https://example.org/report",
   "created_at": "2026-11-13T08:15:30.123456Z",
@@ -85,7 +85,7 @@ Initial status is `received` for `text` and `awaiting_media` for `image` and `te
 }
 ```
 
-The response contains exactly these 11 fields. `claim` is `null` for image-only investigations. `media` is an empty list, and `latest_job`, `latest_result`, and `failure` are `null` until their respective future phases are implemented. This phase does not create job, result, or failure objects. An unknown UUID returns `404 Not Found`; invalid UUID syntax returns `422 Unprocessable Entity`.
+The response contains exactly these 11 fields. For a text-bearing investigation, `claim` is an object with `text`, `language` (or `null` when unavailable), and `normalized_text`. `normalized_text` is initially `null`; it must not copy the submitted text and is populated only when actual normalization is implemented. `claim` is `null` for image-only investigations. `media` is an empty list before media is uploaded, and `latest_job`, `latest_result`, and `failure` are `null` until their respective future phases are implemented. This phase does not create job, result, or failure objects. An unknown UUID returns `404 Not Found`; invalid UUID syntax returns `422 Unprocessable Entity`.
 
 ## Retrieve investigation history
 
@@ -111,7 +111,7 @@ The response contains exactly these 11 fields. `claim` is `null` for image-only 
       "claim": {
         "text": "A fictional claim submitted for investigation.",
         "language": "en",
-        "normalized_text": "A fictional claim submitted for investigation."
+        "normalized_text": null
       },
       "source_reference": "https://example.org/report",
       "created_at": "2026-11-13T08:15:30.123456Z",
@@ -168,7 +168,7 @@ Error response:
 | `404 Not Found` | Investigation UUID does not exist. |
 | `422 Unprocessable Entity` | Invalid request fields, claim, URL, UUID syntax, or pagination parameter. |
 | `422 Unprocessable Entity` with `INVALID_LANGUAGE_TAG` | The language value is not a well-formed BCP-47 tag. |
-| `422 Unprocessable Entity` with `LANGUAGE_NOT_SUPPORTED` | The tag is valid but its primary language is not `en`, `hi`, or `te`. |
+| `422 Unprocessable Entity` with `LANGUAGE_NOT_SUPPORTED` | The tag is well-formed but is not one of `en`, `en-US`, `en-GB`, `hi`, `hi-IN`, `te`, or `te-IN`. |
 | `500 Internal Server Error` | Unexpected database or server failure, returned without internal details. |
 
 ## Deferred API scope

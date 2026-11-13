@@ -12,7 +12,15 @@ InputType = Literal["text", "image", "text_image"]
 InvestigationStatus = Literal[
     "awaiting_media", "received", "processing", "completed", "failed"
 ]
-SUPPORTED_LANGUAGE_CODES = {"en", "hi", "te"}
+SUPPORTED_LANGUAGE_TAGS = {
+    "en",
+    "en-US",
+    "en-GB",
+    "hi",
+    "hi-IN",
+    "te",
+    "te-IN",
+}
 
 
 class InvestigationCreateRequest(BaseModel):
@@ -37,11 +45,10 @@ class InvestigationCreateRequest(BaseModel):
                 "Language must be a well-formed BCP-47 tag.",
             ) from exc
 
-        primary_language = normalized.split("-", 1)[0].lower()
-        if primary_language not in SUPPORTED_LANGUAGE_CODES:
+        if normalized not in SUPPORTED_LANGUAGE_TAGS:
             raise PydanticCustomError(
                 "language_not_supported",
-                "Supported primary languages are en, hi, and te.",
+                "The language tag is well-formed but is not supported.",
             )
         return normalized
 
@@ -80,11 +87,17 @@ class MediaAssetResponse(BaseModel):
     created_at: str
 
 
+class ClaimResponse(BaseModel):
+    text: str
+    language: str | None
+    normalized_text: str | None
+
+
 class InvestigationResponse(BaseModel):
     investigation_id: str
     input_type: InputType
     status: InvestigationStatus
-    claim: str | None
+    claim: ClaimResponse | None
     source_reference: str | None
     created_at: str
     updated_at: str
@@ -106,7 +119,7 @@ class InvestigationHistoryItem(BaseModel):
     investigation_id: str
     input_type: InputType
     status: InvestigationStatus
-    claim: str | None
+    claim: ClaimResponse | None
     source_reference: str | None
     created_at: str
     updated_at: str

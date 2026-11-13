@@ -54,6 +54,25 @@ def get_investigation(
     return dict(row)
 
 
+def update_investigation_status(
+    connection: sqlite3.Connection,
+    investigation_id: str,
+    *,
+    status: str,
+    updated_at: str,
+) -> None:
+    """Update an investigation status inside the caller-owned transaction."""
+
+    connection.execute(
+        """
+        UPDATE investigations
+        SET status = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (status, updated_at, investigation_id),
+    )
+
+
 def list_investigations(
     connection: sqlite3.Connection,
     *,
@@ -63,7 +82,7 @@ def list_investigations(
     rows = connection.execute(
         f"""
         SELECT id, created_at, updated_at, status, input_type,
-               claim_text, source_reference
+               claim_text, language, source_reference
         FROM investigations
         ORDER BY created_at DESC, id DESC
         LIMIT ? OFFSET ?
