@@ -1,0 +1,8 @@
+# Optional, CPU-capable runtimes for Phase 6 local pretrained inference.
+# Install separately only when detector weights have been obtained and reviewed.
+torch>=2.6,<3
+transformers>=4.48,<5
+onnxruntime>=1.20,<2
+opencv-python-headless>=4.10,<5
+librosa>=0.10,<1
+soundfile>=0.12,<1
